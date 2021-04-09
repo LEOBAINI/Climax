@@ -13,22 +13,26 @@
     //Recibir la url del directorio http a mostrar
     $matches = array();
 
-   // $uri=$_GET["uri"];//Habilitar para prod
+    $uri=$_GET["uri"];//Habilitar para prod
     /*URL CON LA QUE SE PROBÓ*/
-    $uri="http://localhost:9091/climax/capture_event/media/35000101/2021-01-22/2021-01-22_185522_176_02/";
+   // $uri="http://localhost:9091/climax/capture_event/media/35000101/2021-01-22/2021-01-22_185522_176_02/";
 ?>
 <!-- partial:index.partial.html -->
 
                
 
 <?php
+
+// Pruebas de compatibilidad
+//1_ comentar definicion de funcion str_contains
+// 2_ comentar checkeo if(count($matches[2])==1)
                     // Definiendo funcion substring si no existe
-                  if (!function_exists('str_contains')) {
+                /*  if (!function_exists('str_contains')) {
                   function str_contains(string $haystack, string $needle): bool
                  {
                   return '' === $needle || false !== strpos($haystack, $needle);
                    }
-                  }
+                  }*/
                  // fin de definicion de funcion exists 
                 if(!empty($uri)){
 
@@ -49,13 +53,13 @@
 <?php
              $indice=2;// comenzamos del 2 porque el uno ya sale por html
                 foreach($matches[2] as $match){
-                   if (str_contains($match, '.')){// para que muestre solo si hay archivo, sino muestra directorio
+              //     if (str_contains($match, '.')){// para que muestre solo si hay archivo, sino muestra directorio
                   //echo $indice;
                   echo '<input type="radio" name="slides" id="slide-'.$indice.'">';
                   $indice++;
                   
                   
-               }
+              // }
 
 
             }
@@ -70,7 +74,7 @@
 
                 foreach($matches[2] as $match){
 
-                if (str_contains($match, '.')){
+              //  if (str_contains($match, '.')){
   ?>                  
                      <li class="carousel__slide">
                     <figure>
@@ -96,7 +100,7 @@
 
 <?php              
   
-                 }//fin   if (str_contains($match, '.')){ es para que no muestre el directorio como una imagen
+             //    }//fin   if (str_contains($match, '.')){ es para que no muestre el directorio como una imagen
 
                  }
                  } else{
@@ -115,7 +119,7 @@
  <?php 
                 $indice=1;
                 foreach($matches[2] as $match){
-                   if (str_contains($match, '.')){// para que muestre solo si hay archivo, sino muestra directorio
+                //   if (str_contains($match, '.')){// para que muestre solo si hay archivo, sino muestra directorio
                    echo '<li>';
                   // ECHO $indice;
                   // echo $match;
@@ -123,7 +127,7 @@
                    $indice++;
                   
                    echo '</li>';
-               }
+           //    }
 
 
             }// fin ciclo
