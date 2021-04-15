@@ -261,13 +261,8 @@ PRINT '@CLIMAX_TASK_MONITORING '+CONVERT(VARCHAR(MAX),@tasks_noXml)
 /*FIN -> INICIALIZACIÓN DE SETTINGS*/
 -- Si es test termina acá,es decir si es la task pero valor negativo, es para ver las variables inicializadas
 if @task_no < 0 return
-if @task_no=12345678 
-begin
-print 'FINALIZADA LA MUESTRA DE VALORES POR DEFAULT'
-PRINT 'RECUERDA COLOCAR EL RECEIVER TYPE DE LA TASK EN CXLINK PARA AUTOCOMPLETADO DEL TASK_OPTIONS'
-return
 
-end
+
 
 
 
