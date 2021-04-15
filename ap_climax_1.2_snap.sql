@@ -1,6 +1,6 @@
 USE [MonitorDB]
 GO
-/****** Object:  StoredProcedure [dbo].[ap_climax]    Script Date: 04/12/2021 19:58:16 ******/
+/****** Object:  StoredProcedure [dbo].[ap_climax]    Script Date: 04/15/2021 18:04:00 ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -10,10 +10,10 @@ AS
 BEGIN
 BEGIN TRY
 
-	
+PRINT 'VERSION 1.2'	
 	
 	/*
-	VERSION 1.1
+	VERSION 1.2
 	
 	Algoritmo buscar en m_signal_processed las tramas que entraron por las task xxxx y revisar si su correspondiente
 	aux2 con el evento definido, en event_history está vacío, en el caso de estarlo, completar según algoritmo de parseo.
@@ -21,7 +21,7 @@ BEGIN TRY
 	Se agrega update task_status cuando entra por el catch, para que si entra por catch miestre error más rápido, y no se ponga normal hasta que esté arreglado el problema.
 	Se agrega control que si no están creadas las variables de la tabla options, se agreguen.
 	intenta cargar las configs del task_option, en caso de que alguna sea null, se asignará una por default
-	Si se le pasa parámetro 10000 sirve para ver los settings que carga
+	Si se le pasa parámetro 12345678 sirve para ver los settings que carga
 	*/
 	
 /*INICIO -> INICIALIZACIÓN DE SETTINGS*/
@@ -64,6 +64,8 @@ declare @imageeventsXml xml
 declare @tasks_noXml xml
 declare @elementos_de_tasks_no as integer
 declare @elementos_de_image_events as integer
+declare @taskOptionElements as integer
+declare @rcvrtyp_id as varchar(max)
 -- Es para propósito de test, si quieres testear como se comportaría y que variables tiene cargadas, se le pasa el nro de la task pero negativo
 if @task_no < 0 
 begin
@@ -116,6 +118,7 @@ SELECT @CLIMAX_MINUTES_BEFORE=option_value from M_TASK_OPTION with(nolock) where
 SELECT @CLIMAX_START_URL_TAG=option_value from M_TASK_OPTION with(nolock) where option_id='CLIMAX_START_URL_TAG' and task_no=@thisTask
 SELECT @CLIMAX_END_URL_TAG=option_value from M_TASK_OPTION with(nolock) where option_id='CLIMAX_END_URL_TAG' and task_no=@thisTask
 SELECT @CLIMAX_IMAGE_EVENTS=option_value from M_TASK_OPTION with(nolock) where option_id='CLIMAX_IMAGE_EVENTS' and task_no=@thisTask
+
 
 
 -- en caso de que alguna sea null, se asignará una por default
@@ -192,26 +195,52 @@ set @elementos_de_image_events=(select count(1) from @image_events)
 set @flag_salida=1;
 set @lastSignal=GETDATE()
 
-/*El tiempo que tarda en hacer cada chequeo contra Master
-Respetar formato hh:mm:ss.mmm*/
-if @CLIMAX_DELAY_TIME is null or @CLIMAX_DELAY_TIME='' set @CLIMAX_DELAY_TIME='00:00:10:000'
-/*minutos hacia atrás que mirará eventos a tratar a partir de inicio de programa*/
-if @CLIMAX_MINUTES_BEFORE ='' or @CLIMAX_MINUTES_BEFORE is null set @CLIMAX_MINUTES_BEFORE=1440 -- un dia por default al arranque
-/*inicializar con las tasks por las que entra Climax*/
-if @elementos_de_tasks_no=0 or @elementos_de_tasks_no is null or @elementos_de_tasks_no='' insert into @tasks_no values (29), (229), (284)
-/*inicializar los eventos que traen imágen*/
-if @elementos_de_image_events=0 or @elementos_de_image_events is null or @elementos_de_image_events='' insert into @image_events values ('CXLINK')
-/*Etiquetas de inicio y fin del URL del directorio http*/
-if @CLIMAX_START_URL_TAG is null or @CLIMAX_START_URL_TAG='' set @CLIMAX_START_URL_TAG='<LINK>'
-if @CLIMAX_END_URL_TAG is null or @CLIMAX_END_URL_TAG='' set @CLIMAX_END_URL_TAG='<LINK/>'
-/*El caracter PIPE*/
+
+/*CHEQUEO, SI NO TIENE LAS TASK_OPTION CARGADAS LA TASK, CARGAR*/
+set @taskOptionElements=(select count(1) from m_task_option where task_no=@thisTask)  
+set @rcvrtyp_id=(select rcvrtyp_id  from m_task where task_no=@thisTask)
+
+IF(@rcvrtyp_id='CXLINK')
+BEGIN
+	IF (@taskOptionElements=0)
+	BEGIN
+	insert into m_task_option values
+	(@thisTask,'CLIMAX_DELAY_TIME',getdate(),1,'00:00:05:000'),
+	(@thisTask,'CLIMAX_HTTP_SERVER_URL',getdate(),1,'http://10.24.34.23/index.php?uri='),
+	(@thisTask,'CLIMAX_IMAGE_EVENTS',getdate(),1,'CXLINK'),
+	(@thisTask,'CLIMAX_MAS_PREFIX',getdate(),1,'VF|MAS|'),
+	(@thisTask,'CLIMAX_MAX_ROW_PROCESSING',getdate(),1,'200'),
+	(@thisTask,'CLIMAX_MINUTES_BEFORE',getdate(),1,'60'),
+	(@thisTask,'CLIMAX_START_URL_TAG',getdate(),1,'<LINK>'),
+	(@thisTask,'CLIMAX_END_URL_TAG',getdate(),1,'<LINK/>'),
+	(@thisTask,'CLIMAX_TASK_MONITORING',getdate(),1,'29,229,284')
+	END
+	ELSE IF(@taskOptionElements<>9 AND @taskOptionElements<>0)
+	BEGIN
+	PRINT 'COLOQUE TASK_OPTIONS (9) O DEJE SIN TASK_OPTIONS ASÍ SE CARGA POR DEFAULT'
+				UPDATE m_task_current_status
+				SET last_status_date = GETDATE(), taskstat_no = 4,
+						last_error_msg = 'COMPLETE TASK_OPTIONS OR LEAVE EMPTY FOR AUTO COMPLETE',last_signal_date=@lastSignal,last_status='SEE.RECVTP'
+				WHERE task_no = @thisTask AND enable_flag = 'Y'
+				
+				RETURN
+	END
+END
+ELSE
+BEGIN
+PRINT 'COLOQUE EL RECEIVER TYPE "CXLINK" EN LA TASK'
+UPDATE m_task_current_status
+				SET last_status_date = GETDATE(), taskstat_no = 4,
+						last_error_msg = 'PLEASE SET "CXLINK" RECEIVER TYPE ON TASK',last_signal_date=@lastSignal,last_status='SEE.RECVTP'
+				WHERE task_no = @thisTask AND enable_flag = 'Y'
+				--print 'Actualizo Estado de la TASK'
+				RETURN
+END
+
+
+
 set @pipe='|'
 set @barra='//'
-if @CLIMAX_MAS_PREFIX is null or @CLIMAX_MAS_PREFIX='' set @CLIMAX_MAS_PREFIX='VF|MAS|'
-
-if (@CLIMAX_HTTP_SERVER_URL is null or @CLIMAX_HTTP_SERVER_URL ='') set @CLIMAX_HTTP_SERVER_URL='http://10.24.34.23/index.php?uri='
-
-if @CLIMAX_MAX_ROW_PROCESSING=0 or @CLIMAX_MAX_ROW_PROCESSING='' or @CLIMAX_MAX_ROW_PROCESSING is null set @CLIMAX_MAX_ROW_PROCESSING=200
 
 /*IMPRIMIR SETTINGS */
 
@@ -235,6 +264,7 @@ if @task_no < 0 return
 if @task_no=12345678 
 begin
 print 'FINALIZADA LA MUESTRA DE VALORES POR DEFAULT'
+PRINT 'RECUERDA COLOCAR EL RECEIVER TYPE DE LA TASK EN CXLINK PARA AUTOCOMPLETADO DEL TASK_OPTIONS'
 return
 
 end
@@ -327,11 +357,13 @@ print 'salgo del cursor'
 end
 --select * from @events_seqs_no
 /*Ponemos la task de MAS en Normal*/
+
 UPDATE m_task_current_status
 				SET last_status_date = GETDATE(), taskstat_no = 1,
 						last_error_msg = 'Normal',last_signal_date=@lastSignal,last_status=null
 				WHERE task_no = @thisTask AND enable_flag = 'Y'
 				print 'Actualizo Estado de la TASK'
+				
 WAITFOR DELAY @CLIMAX_DELAY_TIME
 
 
