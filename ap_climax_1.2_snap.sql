@@ -1,6 +1,6 @@
 USE [MonitorDB]
 GO
-/****** Object:  StoredProcedure [dbo].[ap_climax]    Script Date: 04/15/2021 18:04:00 ******/
+/****** Object:  StoredProcedure [dbo].[ap_climax]    Script Date: 26/04/2021 17:27:21 ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -10,10 +10,10 @@ AS
 BEGIN
 BEGIN TRY
 
-PRINT 'VERSION 1.2'	
+PRINT 'VERSION 1.2.1'	
 	
 	/*
-	VERSION 1.2
+	VERSION 1.2.1
 	
 	Algoritmo buscar en m_signal_processed las tramas que entraron por las task xxxx y revisar si su correspondiente
 	aux2 con el evento definido, en event_history está vacío, en el caso de estarlo, completar según algoritmo de parseo.
@@ -22,6 +22,7 @@ PRINT 'VERSION 1.2'
 	Se agrega control que si no están creadas las variables de la tabla options, se agreguen.
 	intenta cargar las configs del task_option, en caso de que alguna sea null, se asignará una por default
 	Si se le pasa parámetro 12345678 sirve para ver los settings que carga
+	Bug corregido: Bug corregido 26/04/2021 (and option_id like 'CLIMAX_%'), para que permita mas de 9 task_option
 	*/
 	
 /*INICIO -> INICIALIZACIÓN DE SETTINGS*/
@@ -197,7 +198,8 @@ set @lastSignal=GETDATE()
 
 
 /*CHEQUEO, SI NO TIENE LAS TASK_OPTION CARGADAS LA TASK, CARGAR*/
-set @taskOptionElements=(select count(1) from m_task_option where task_no=@thisTask)  
+set @taskOptionElements=(select count(1) from m_task_option where task_no=@thisTask and option_id like 'CLIMAX_%')  
+--Bug corregido 26/04/2021 (and option_id like 'CLIMAX_%')
 set @rcvrtyp_id=(select rcvrtyp_id  from m_task where task_no=@thisTask)
 
 IF(@rcvrtyp_id='CXLINK')
