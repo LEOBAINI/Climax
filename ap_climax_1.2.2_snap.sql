@@ -1,6 +1,6 @@
 USE [MonitorDB]
 GO
-/****** Object:  StoredProcedure [dbo].[ap_climax]    Script Date: 26/04/2021 17:27:21 ******/
+/****** Object:  StoredProcedure [dbo].[ap_climax]    Script Date: 04/30/2021 14:47:41 ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -10,10 +10,10 @@ AS
 BEGIN
 BEGIN TRY
 
-PRINT 'VERSION 1.2.1'	
+PRINT 'VERSION 1.2.2'	
 	
 	/*
-	VERSION 1.2.1
+	VERSION 1.2.2
 	
 	Algoritmo buscar en m_signal_processed las tramas que entraron por las task xxxx y revisar si su correspondiente
 	aux2 con el evento definido, en event_history está vacío, en el caso de estarlo, completar según algoritmo de parseo.
@@ -67,6 +67,13 @@ declare @elementos_de_tasks_no as integer
 declare @elementos_de_image_events as integer
 declare @taskOptionElements as integer
 declare @rcvrtyp_id as varchar(max)
+declare @ipReceptora varchar(max)--26/04/2021
+declare @puertoImagenReceptora varchar(max)--26/04/2021
+declare @comienzoUrl as varchar(max)--26/04/2021
+set @comienzoUrl='://'--26/04/2021
+set @puertoImagenReceptora='8899'--26/04/2021
+
+set @puertoImagenReceptora=':'+@puertoImagenReceptora--26/04/2021
 -- Es para propósito de test, si quieres testear como se comportaría y que variables tiene cargadas, se le pasa el nro de la task pero negativo
 if @task_no < 0 
 begin
@@ -113,6 +120,11 @@ END
 -- intenta cargar las configs del task_option, 
 SELECT @CLIMAX_DELAY_TIME=option_value from M_TASK_OPTION with(nolock)where option_id='CLIMAX_DELAY_TIME' and task_no=@thisTask
 SELECT @CLIMAX_HTTP_SERVER_URL=option_value from M_TASK_OPTION with(nolock) where option_id='CLIMAX_HTTP_SERVER_URL' and task_no=@thisTask
+IF(LEN(ISNULL(@CLIMAX_HTTP_SERVER_URL,''))=0)--SI NO TIENE UN VALOR CARGADO, ES NULL O VACIO ENTONCES SE LLENA POR DEFAULT 26/04/2021
+BEGIN
+SET @CLIMAX_HTTP_SERVER_URL='http://RECEIVER_IP/index.php?uri='
+/*RECEIVER_IP, se usará ára hacer un replace luego, si es que no hay cargado una url en el task option*/
+END
 SELECT @CLIMAX_MAS_PREFIX=option_value from M_TASK_OPTION with(nolock) where option_id='CLIMAX_MAS_PREFIX' and task_no=@thisTask
 SELECT @CLIMAX_MAX_ROW_PROCESSING=option_value from M_TASK_OPTION with(nolock) where option_id='CLIMAX_MAX_ROW_PROCESSING' and task_no=@thisTask
 SELECT @CLIMAX_MINUTES_BEFORE=option_value from M_TASK_OPTION with(nolock) where option_id='CLIMAX_MINUTES_BEFORE' and task_no=@thisTask
@@ -199,7 +211,7 @@ set @lastSignal=GETDATE()
 
 /*CHEQUEO, SI NO TIENE LAS TASK_OPTION CARGADAS LA TASK, CARGAR*/
 set @taskOptionElements=(select count(1) from m_task_option where task_no=@thisTask and option_id like 'CLIMAX_%')  
---Bug corregido 26/04/2021 (and option_id like 'CLIMAX_%')
+--Bug corregido 26/04/2021 (and option_id like 'CLIMAX_%'), al querer cargar mas de 9 task_option saltaba error por distinto de 9
 set @rcvrtyp_id=(select rcvrtyp_id  from m_task where task_no=@thisTask)
 
 IF(@rcvrtyp_id='CXLINK')
@@ -208,16 +220,16 @@ BEGIN
 	BEGIN
 	insert into m_task_option values
 	(@thisTask,'CLIMAX_DELAY_TIME',getdate(),1,'00:00:05:000'),
-	(@thisTask,'CLIMAX_HTTP_SERVER_URL',getdate(),1,'http://10.24.34.23/index.php?uri='),
+	(@thisTask,'CLIMAX_HTTP_SERVER_URL',getdate(),1,@CLIMAX_HTTP_SERVER_URL),-- por default será SET @CLIMAX_HTTP_SERVER_URL='http://RECEIVER_IP/index.php?uri='
 	(@thisTask,'CLIMAX_IMAGE_EVENTS',getdate(),1,'CXLINK'),
 	(@thisTask,'CLIMAX_MAS_PREFIX',getdate(),1,'VF|MAS|'),
 	(@thisTask,'CLIMAX_MAX_ROW_PROCESSING',getdate(),1,'200'),
 	(@thisTask,'CLIMAX_MINUTES_BEFORE',getdate(),1,'60'),
 	(@thisTask,'CLIMAX_START_URL_TAG',getdate(),1,'<LINK>'),
 	(@thisTask,'CLIMAX_END_URL_TAG',getdate(),1,'<LINK/>'),
-	(@thisTask,'CLIMAX_TASK_MONITORING',getdate(),1,'29,229,284')
+	(@thisTask,'CLIMAX_TASK_MONITORING',getdate(),1,'10000')--Para no crear un procesamiento inicial en task que tal vez existan ponemos nro alto.
 	END
-	ELSE IF(@taskOptionElements<>9 AND @taskOptionElements<>0)
+	ELSE IF(@taskOptionElements<>9 AND @taskOptionElements<>0 )
 	BEGIN
 	PRINT 'COLOQUE TASK_OPTIONS (9) O DEJE SIN TASK_OPTIONS ASÍ SE CARGA POR DEFAULT'
 				UPDATE m_task_current_status
@@ -243,6 +255,8 @@ END
 
 set @pipe='|'
 set @barra='//'
+
+
 
 /*IMPRIMIR SETTINGS */
 
@@ -333,8 +347,19 @@ BEGIN
 			select @raw_message=raw_message,@lastSignal=recv_date from m_signal_processed 
 			with(nolock) where event_seqno=@seqno
 
+			
+
+
 			set @link=SUBSTRING(@raw_message,CHARINDEX(@CLIMAX_START_URL_TAG,@raw_message)+LEN(@CLIMAX_START_URL_TAG),CHARINDEX(@CLIMAX_END_URL_TAG,@raw_message)-CHARINDEX(@CLIMAX_START_URL_TAG,@raw_message)-LEN(@CLIMAX_START_URL_TAG))
 			set @linkcompleto=@CLIMAX_MAS_PREFIX+@CLIMAX_HTTP_SERVER_URL+@link+@barra+@pipe
+			/*26/04/2021 Si la variable @CLIMAX_HTTP_SERVER_URL no fue cargada en el task option, tendrá un valor por default,
+			será @CLIMAX_HTTP_SERVER_URL='http://RECEIVER_IP/index.php?uri=', el replace, reemplazará RECEIVER_IP por la ip de la receptora pasada por parámetro,
+			de esa manera, si entró por más de una receptora, el usuario será redireccionado con el link que corresponda, ya que las imágenes no redundan entre las receptoras.
+			*/
+			set @ipReceptora= substring(@link,CHARINDEX(@comienzoUrl,@link)+LEN(@comienzoUrl),CHARINDEX(@puertoImagenReceptora,@link)-CHARINDEX(@comienzoUrl,@link)-LEN(@comienzoUrl))
+			--print @ipReceptora
+			set @linkcompleto=replace(@linkcompleto,'RECEIVER_IP',@ipReceptora)
+
 			
 			UPDATE event_history SET aux2=@linkcompleto WHERE seqno=@seqno
 			PRINT 'ACTUALIZANDO SEQNO '+CONVERT(VARCHAR(MAX),@seqno)+' EN EVENT_HISTORY' 
