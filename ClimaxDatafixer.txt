@@ -1,0 +1,58 @@
+declare @inicioCaracter as varchar(5)
+declare @finCaracter as varchar(5)
+declare @finCaracter2 as varchar(5)
+declare @URL as varchar(MAX)
+declare @inicioCaracterip as varchar(5)
+declare @finCaracterip as varchar(5)
+declare @prefijoUrl as varchar(max)
+declare @sufijoUrl as varchar(max)
+declare @ipReceptora as varchar(max)
+declare @seqno as integer
+declare @urlClickeable as varchar(max)
+declare @paramPhp as varchar(max)
+declare @sentenciaUpdate as varchar(max)
+declare @serverid as varchar(1)
+set @serverid=(select server_id from monitor_server where servername=@@servername)
+--set @serverid=''''+@serverid+''''
+
+
+
+
+
+set @inicioCaracter='http'
+set @finCaracter='<'
+set @finCaracter2='CUSTOM'-- En los casos en que la ip es mas larga, ya no aparece el caracter de fin...
+set @inicioCaracterip='10'
+set @finCaracterip=':8899' 
+set @prefijoUrl='VF|MAS|http://'
+set @paramPhp='/index.php?uri='
+set @sufijoUrl='/|'
+
+
+
+select *,'update event_history set aux2='''+aux2ByLb+''' where seqno='+convert(varchar,seqno)+' and server_id='+@serverid Sql from(
+SELECT 
+seqno,ip,urldirectorio,@prefijoUrl+ip+@paramPhp+urldirectorio+@sufijoUrl aux2ByLb,aux2,event_date
+FROM (
+select  seqno,
+case when CHARINDEX(@finCaracter,COMMENT,CHARINDEX(@inicioCaracter,COMMENT,1))<>0 then
+
+SUBSTRING(COMMENT,CHARINDEX(@inicioCaracter,COMMENT,1),CHARINDEX(@finCaracter,COMMENT,charindex(@inicioCaracter,COMMENT,2))-CHARINDEX(@inicioCaracter,COMMENT,1))
+else 
+SUBSTRING(COMMENT,CHARINDEX(@inicioCaracter,COMMENT,1),CHARINDEX(@finCaracter2,COMMENT,charindex(@inicioCaracter,COMMENT,2))-CHARINDEX(@inicioCaracter,COMMENT,1)-3)
+--comment
+end urldirectorio,
+SUBSTRING(COMMENT,CHARINDEX(@inicioCaracterip,COMMENT,1),CHARINDEX(@finCaracterip,COMMENT,charindex(@inicioCaracterip,COMMENT,2))-CHARINDEX(@inicioCaracterip,COMMENT,1)) ip,
+aux2,
+event_date
+
+from event_history 
+where 
+comment like '%<LINK>%'
+AND comment not like 'Bad%'
+AND event_id='CXLINK'
+AND event_date> getdate()-100
+and server_id=@serverid
+)FILTRO
+)filtro2
+where aux2<>aux2ByLb
