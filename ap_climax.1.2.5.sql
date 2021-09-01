@@ -1,9 +1,16 @@
+USE [MonitorTestDB]
+GO
+/****** Object:  StoredProcedure [dbo].[ap_climax]    Script Date: 1/9/2021 18:02:52 ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
 ALTER PROCEDURE [dbo].[ap_climax] @task_no integer
 AS
 BEGIN
 BEGIN TRY
 
-PRINT 'VERSION 1.2.4'	
+PRINT 'VERSION 1.2.5'	
 	
 	/*
 	VERSION 1.2.2
@@ -16,21 +23,35 @@ PRINT 'VERSION 1.2.4'
 	intenta cargar las configs del task_option, en caso de que alguna sea null, se asignará una por default
 	Si se le pasa parámetro 12345678 sirve para ver los settings que carga
 	Bug corregido: Bug corregido 26/04/2021 (and option_id like 'CLIMAX_%'), para que permita mas de 9 task_option
-
 	VERSION 1.2.3 
 	Se agrega control de que solo actualice cuando el server_id corresponde al servidor actualizante,
 	para así evitar escribir en seqno repetido cuando hay más de un grupo, como es el caso de España.
-
 	VERSION 1.2.4 Se corrije bug, que reprocesaba los eventos, sobreescribiendo con url de otros contratos.
-
 	delete @events_seqs_no --19/08/2021 al no borrar la variable tabla @events_seqs_no y el proceso, como nunca se reinicia en el tiempo, se acumulaban @seqno
 -- y los volvía a procesar con el valor de LinkCompleto que como nunca trae null, siempre queda con el último link generado.
 -- Entonces si reprocesa, 2000 seqno viejos, que ya no existen en m_signal_processed, les pone el mismo valor, hasta que aparece el seqno que si existe en ambas tablas, 
 -- y actualiza el link completo. por eso es necesario que con cada "procesamiento" la tabla arranque limpia al igual que la variable @linkCompleto.
 -- El el comportamiento análogo a inicializar una variable con null.
-
 -- vaciar variable 
 			set @linkcompleto=null --19/08/2021
+
+	VERSION 1.2.5 En esta versión en vez de actualizar el evento correspondiente en event_history colocando el link en aux2, se utlizará
+	el stored procedure de utc ap_manual_signal para insertar un evento que en el cuerpo del mensaje lleve la url clickeable por el usuario
+	y de esa manera al insertar un evento, este replique por redundancia.
+
+ Modo de uso de ejemplo usado en Smart:
+ exec dbo.ap_manual_signal N'C123456' -- Cód connexion 
+,NULL --log_date (siempre null) ,
+N'SMPAN' – evento (para pánico usar SMPAN ,
+N'A' --estado zona (para pánico usar A) ,
+N'600' –Zona (usar zona virtual 600) ,
+N'SMART' --ID Usuario, máx 6 caracteres (poner SMART para ver claro el origen) ,
+N'US# FRAN5678901234567890@PROSEGUR.COM LOC# 40.453266 -3.6942988' --Comentario. Por ej. usuario que lo ha generado + localización. Max 255
+,N'N' --log_only. Siempre 'N'
+,N'Y' --recurse_flag. Siempre 'Y'
+,0 --debug. Siempre 0
+,100004 --ID Empleado que inserta. Por ejemplo 100004
+exec dbo.ap_manual_signal N'C123456',NULL,N'SMPAN',N'A',N'600',N'SMART',N'US# FRAN5678901234567890@PROSEGUR.COM LOC# 40.453266 -3.6942988' ,N'N',N'Y',0,100004
 	*/
 	
 /*INICIO -> INICIALIZACIÓN DE SETTINGS*/
@@ -53,6 +74,7 @@ declare @raw_message as varchar(max)
 declare @link as varchar(max)
 declare @CLIMAX_MAS_PREFIX as varchar(max)
 declare @linkcompleto as varchar(max)
+declare @linkams as varchar(max)
 declare @pipe as varchar(1)
 declare @barra as varchar(1)
 declare @CLIMAX_START_URL_TAG as varchar(max)
@@ -79,6 +101,39 @@ declare @rcvrtyp_id as varchar(max)
 declare @ipReceptora varchar(max)--26/04/2021
 declare @puertoImagenReceptora varchar(max)--26/04/2021
 declare @comienzoUrl as varchar(max)--26/04/2021
+--1/9/2021 1.2.5
+/*Variables obligatorias de ap_manual_signal*/
+declare @ams_cs_no	as varchar(20) 
+declare @ams_log_date as datetime 
+declare @ams_event_id as char(6) 
+declare @ams_zonestate_id as char(4) 
+declare @ams_zone as char(6) 
+declare @ams_user as char(6) 
+declare @ams_comment as	varchar(255) 
+declare @ams_log_only as char(1) 
+declare @ams_recurse_flag as char(1)
+declare @ams_debug as int 
+declare @ams_emp_no	as int
+
+/*set de variables fijas ap_manual_signal por def de doc "Inserción de eventos desde la plataforma Smart en MAStermind"*/
+set @ams_cs_no=null -- valor inicial, mas abajo se setea el correcto
+set @ams_log_date=null
+set @ams_event_id='CLNK' 
+set @ams_zonestate_id='A' 
+set @ams_zone='600' 
+set @ams_user='CLIMAX' 
+set @ams_comment=NULL -- IRÁ LA URL FORMATEADA
+set @ams_log_only='N'
+set @ams_recurse_flag='Y'
+set @ams_debug=0 
+set @ams_emp_no=1 -- MAS
+
+
+
+
+
+
+
 set @comienzoUrl='://'--26/04/2021
 set @puertoImagenReceptora='8899'--26/04/2021
 
@@ -360,6 +415,7 @@ BEGIN
 
 			set @link=SUBSTRING(@raw_message,CHARINDEX(@CLIMAX_START_URL_TAG,@raw_message)+LEN(@CLIMAX_START_URL_TAG),CHARINDEX(@CLIMAX_END_URL_TAG,@raw_message)-CHARINDEX(@CLIMAX_START_URL_TAG,@raw_message)-LEN(@CLIMAX_START_URL_TAG))
 			set @linkcompleto=@CLIMAX_MAS_PREFIX+@CLIMAX_HTTP_SERVER_URL+@link+@barra+@pipe
+			set @linkams=@CLIMAX_HTTP_SERVER_URL+@link+@barra --1.2.5
 			/*26/04/2021 Si la variable @CLIMAX_HTTP_SERVER_URL no fue cargada en el task option, tendrá un valor por default,
 			será @CLIMAX_HTTP_SERVER_URL='http://RECEIVER_IP/index.php?uri=', el replace, reemplazará RECEIVER_IP por la ip de la receptora pasada por parámetro,
 			de esa manera, si entró por más de una receptora, el usuario será redireccionado con el link que corresponda, ya que las imágenes no redundan entre las receptoras.
@@ -367,14 +423,50 @@ BEGIN
 			set @ipReceptora= substring(@link,CHARINDEX(@comienzoUrl,@link)+LEN(@comienzoUrl),CHARINDEX(@puertoImagenReceptora,@link)-CHARINDEX(@comienzoUrl,@link)-LEN(@comienzoUrl))
 			--print @ipReceptora
 			set @linkcompleto=replace(@linkcompleto,'RECEIVER_IP',@ipReceptora)
-
+			set @linkams=replace(@linkams,'RECEIVER_IP',@ipReceptora) --1.2.5
 			
+
+			-- 1/9/2021 v 1.2.5
+			
+			
+			select @ams_cs_no=cs_no from system with(nolock)
+			where system_no=
+			(select system_no from event_history with(nolock) where seqno=@seqno and server_id=@server_id) -- debe ir server_id porque puede haber grupos, caso España
+			-- 1.2.5
+			set @ams_comment='url: '+@linkams+';
+			'
+
+			-- Este salto de linea, exactamente tal cual está, es a proposito, para que aparezca en verde la linea event_history en MasterMind
+	-- y el vinculo quede clickeable y asi abra la url de la foto
+	-- descubrimiento by Frank
+
+			exec dbo.ap_manual_signal 
+			@ams_cs_no, 
+			@ams_log_date,
+			@ams_event_id , 
+			@ams_zonestate_id, 
+			@ams_zone, 
+			@ams_user, 
+			@ams_comment, 
+			@ams_log_only, 
+			@ams_recurse_flag,
+			@ams_debug, 
+			@ams_emp_no
+
+
+
+
+
+
+
 			UPDATE event_history SET aux2=@linkcompleto WHERE seqno=@seqno and server_id=@server_id --1.2.3
 			PRINT 'ACTUALIZANDO SEQNO '+CONVERT(VARCHAR(MAX),@seqno)+' EN EVENT_HISTORY' 
 			print @linkcompleto
 			
 			-- vaciar variable 
 			set @linkcompleto=null --19/08/2021
+			set @ams_cs_no=null -- 1.2.5
+			set @ams_comment=null -- 1.2.5
 			
 			
 			
@@ -416,10 +508,10 @@ UPDATE m_task_current_status
 				print 'Actualizo Estado de la TASK'
 				
 				print 'ERROR NRO '+CONVERT(VARCHAR(MAX),@@error)+' LINEA '+ CONVERT(VARCHAR(MAX),ERROR_LINE())+' '+ ERROR_MESSAGE()+' EN EL SP -> '+ ERROR_PROCEDURE()
+
 WAITFOR DELAY @CLIMAX_DELAY_TIME
 	
 				
 END CATCH
 
 END
-
