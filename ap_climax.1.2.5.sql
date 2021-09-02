@@ -1,11 +1,6 @@
-USE [MonitorTestDB]
-GO
-/****** Object:  StoredProcedure [dbo].[ap_climax]    Script Date: 1/9/2021 18:02:52 ******/
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-ALTER PROCEDURE [dbo].[ap_climax] @task_no integer
+Text
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+CREATE PROCEDURE [dbo].[ap_climax] @task_no integer
 AS
 BEGIN
 BEGIN TRY
@@ -36,8 +31,10 @@ PRINT 'VERSION 1.2.5'
 			set @linkcompleto=null --19/08/2021
 
 	VERSION 1.2.5 En esta versión en vez de actualizar el evento correspondiente en event_history colocando el link en aux2, se utlizará
-	el stored procedure de utc ap_manual_signal para insertar un evento que en el cuerpo del mensaje lleve la url clickeable por el usuario
-	y de esa manera al insertar un evento, este replique por redundancia.
+	el stored procedure de utc ap_manual_signal para insertar un evento @CLIMAX_MASKED_EVENT, y que en el cuerpo del mensaje lleve la url clickeable 
+	por el usuario.
+	De esa manera al insertar un evento @CLIMAX_MASKED_EVENT, este replique por redundancia.
+	Se quita option_id CLIMAX_MAS_PEFIX y se agrega CLIMAX_MASKED_EVENT
 
  Modo de uso de ejemplo usado en Smart:
  exec dbo.ap_manual_signal N'C123456' -- Cód connexion 
@@ -71,8 +68,10 @@ declare @CLIMAX_MINUTES_BEFORE as integer
 --ejemplo packet sender S011[#8888|NBA*'<LINK>http://10.24.34.23:8899/capture_event/media/35000009/2021-02-11/2021-02-11_124646_39_06/35000009_012a3930_2021-02-11_134646_006.jpg<LINK/>']    <6>
 declare @seqno as numeric(18,0)
 declare @raw_message as varchar(max)
+declare @zone_start_tag as varchar(max) --1.2.5
+declare @zone_end_tag as varchar(max)--1.2.5
 declare @link as varchar(max)
-declare @CLIMAX_MAS_PREFIX as varchar(max)
+--declare @CLIMAX_MAS_PREFIX as varchar(max) --1.2.5 Ya no se usa, porque no se necesita icono de cámara en link
 declare @linkcompleto as varchar(max)
 declare @linkams as varchar(max)
 declare @pipe as varchar(1)
@@ -91,6 +90,7 @@ declare @CLIMAX_IMAGE_EVENTS as varchar(max)
 declare @CLIMAX_IMAGE_EVENTS_aux as varchar(max)
 declare @CLIMAX_TASK_MONITORING as varchar(max)
 declare @CLIMAX_TASK_MONITORING_aux as varchar(max)
+declare @CLIMAX_MASKED_EVENT as varchar(max) --1.2.5 
 declare @largo_palabra as integer
 declare @imageeventsXml xml
 declare @tasks_noXml xml
@@ -114,6 +114,9 @@ declare @ams_log_only as char(1)
 declare @ams_recurse_flag as char(1)
 declare @ams_debug as int 
 declare @ams_emp_no	as int
+/*Variables para determinar la zona en función del rawmessage*/-- 1.2.5
+set @zone_start_tag='|N'
+set @zone_end_tag='*'''
 
 /*set de variables fijas ap_manual_signal por def de doc "Inserción de eventos desde la plataforma Smart en MAStermind"*/
 set @ams_cs_no=null -- valor inicial, mas abajo se setea el correcto
@@ -127,10 +130,6 @@ set @ams_log_only='N'
 set @ams_recurse_flag='Y'
 set @ams_debug=0 
 set @ams_emp_no=1 -- MAS
-
-
-
-
 
 
 
@@ -156,11 +155,12 @@ SELECT @CANTIDAD_VARIABLES_CLIMAX_AP_CLIMAX=COUNT(1) FROM options WHERE
 OPTION_ID='CLIMAX_END_URL_TAG' OR
 OPTION_ID='CLIMAX_HTTP_SERVER_URL' OR
 OPTION_ID='CLIMAX_IMAGE_EVENTS' OR
-OPTION_ID='CLIMAX_MAS_PREFIX' OR
+-- OPTION_ID='CLIMAX_MAS_PREFIX' OR 1.2.5
 OPTION_ID='CLIMAX_MAX_ROW_PROCESSING' OR
 OPTION_ID='CLIMAX_MINUTES_BEFORE' OR
 OPTION_ID='CLIMAX_START_URL_TAG' OR
-OPTION_ID='CLIMAX_TASK_MONITORING')
+OPTION_ID='CLIMAX_TASK_MONITORING' OR
+OPTION_ID='CLIMAX_MASKED_EVENT') -- 1.2.5
 IF (@CANTIDAD_VARIABLES_CLIMAX_AP_CLIMAX<>9)
 BEGIN
 DELETE options WHERE OPTION_ID LIKE 'CLIMAX_%'AND option_id<>'climax_video_url'
@@ -169,16 +169,17 @@ INSERT INTO OPTIONS VALUES
 ('CLIMAX_END_URL_TAG','CLIMAX_END_URL_TAG',1,GETDATE(),'N',NULL,NULL,NULL,'N','T',NULL,'N','Y'),
 ('CLIMAX_HTTP_SERVER_URL','CLIMAX_HTTP_SERVER_URL',1,GETDATE(),'N',NULL,NULL,NULL,'N','T',NULL,'N','Y'),
 ('CLIMAX_IMAGE_EVENTS','CLIMAX_IMAGE_EVENTS',1,GETDATE(),'N',NULL,NULL,NULL,'N','T',NULL,'N','Y'),
-('CLIMAX_MAS_PREFIX','CLIMAX_MAS_PREFIX',1,GETDATE(),'N',NULL,NULL,NULL,'N','T',NULL,'N','Y'),
+-- ('CLIMAX_MAS_PREFIX','CLIMAX_MAS_PREFIX',1,GETDATE(),'N',NULL,NULL,NULL,'N','T',NULL,'N','Y'), 1.2.5
 ('CLIMAX_MAX_ROW_PROCESSING','CLIMAX_MAX_ROW_PROCESSING',1,GETDATE(),'N',NULL,NULL,'N','N','T',NULL,'N','Y'),
 ('CLIMAX_MINUTES_BEFORE','CLIMAX_MINUTES_BEFORE',1,GETDATE(),'N',NULL,NULL,NULL,'N','T',NULL,'N','Y'),
 ('CLIMAX_START_URL_TAG','CLIMAX_START_URL_TAG',1,GETDATE(),'N',NULL,NULL,NULL,'N','T',NULL,'N','Y'),
-('CLIMAX_TASK_MONITORING','CLIMAX_TASK_MONITORING',1,GETDATE(),'N',NULL,NULL,NULL,'N','T',NULL,'N','Y')
+('CLIMAX_TASK_MONITORING','CLIMAX_TASK_MONITORING',1,GETDATE(),'N',NULL,NULL,NULL,'N','T',NULL,'N','Y'),
+('CLIMAX_MASKED_EVENT','CLIMAX_MASKED_EVENT',1,GETDATE(),'N',NULL,NULL,NULL,'N','T',NULL,'N','Y')
 PRINT 'TABLA OPTIONS SETEADA'
 END
 ELSE
 BEGIN
-PRINT 'NADA PARA SETEAR EN OPTIONS ESTÁN SUS 9 VARIABLES' 
+PRINT 'NADA PARA SETEAR EN OPTIONS ESTÁN SUS 10 VARIABLES' 
 END
 /*FIN SETTINGS EN TABLA OPTIONS DE DONDE TASK OPTION TOMARÁ VALORES*/
 -- intenta cargar las configs del task_option, 
@@ -189,12 +190,16 @@ BEGIN
 SET @CLIMAX_HTTP_SERVER_URL='http://RECEIVER_IP/index.php?uri='
 /*RECEIVER_IP, se usará ára hacer un replace luego, si es que no hay cargado una url en el task option*/
 END
-SELECT @CLIMAX_MAS_PREFIX=option_value from M_TASK_OPTION with(nolock) where option_id='CLIMAX_MAS_PREFIX' and task_no=@thisTask
+-- SELECT @CLIMAX_MAS_PREFIX=option_value from M_TASK_OPTION with(nolock) where option_id='CLIMAX_MAS_PREFIX' and task_no=@thisTask 1.2.5
 SELECT @CLIMAX_MAX_ROW_PROCESSING=option_value from M_TASK_OPTION with(nolock) where option_id='CLIMAX_MAX_ROW_PROCESSING' and task_no=@thisTask
 SELECT @CLIMAX_MINUTES_BEFORE=option_value from M_TASK_OPTION with(nolock) where option_id='CLIMAX_MINUTES_BEFORE' and task_no=@thisTask
 SELECT @CLIMAX_START_URL_TAG=option_value from M_TASK_OPTION with(nolock) where option_id='CLIMAX_START_URL_TAG' and task_no=@thisTask
 SELECT @CLIMAX_END_URL_TAG=option_value from M_TASK_OPTION with(nolock) where option_id='CLIMAX_END_URL_TAG' and task_no=@thisTask
 SELECT @CLIMAX_IMAGE_EVENTS=option_value from M_TASK_OPTION with(nolock) where option_id='CLIMAX_IMAGE_EVENTS' and task_no=@thisTask
+SELECT @CLIMAX_MASKED_EVENT=option_value from M_TASK_OPTION with(nolock) where option_id='CLIMAX_MASKED_EVENT' and task_no=@thisTask --1.2.5
+
+set @ams_event_id=@CLIMAX_MASKED_EVENT --1.2.5
+
 
 
 
@@ -286,12 +291,15 @@ BEGIN
 	(@thisTask,'CLIMAX_DELAY_TIME',getdate(),1,'00:00:05:000'),
 	(@thisTask,'CLIMAX_HTTP_SERVER_URL',getdate(),1,@CLIMAX_HTTP_SERVER_URL),-- por default será SET @CLIMAX_HTTP_SERVER_URL='http://RECEIVER_IP/index.php?uri='
 	(@thisTask,'CLIMAX_IMAGE_EVENTS',getdate(),1,'CXLINK'),
-	(@thisTask,'CLIMAX_MAS_PREFIX',getdate(),1,'VF|MAS|'),
+--	(@thisTask,'CLIMAX_MAS_PREFIX',getdate(),1,'VF|MAS|'), 1.2.5
 	(@thisTask,'CLIMAX_MAX_ROW_PROCESSING',getdate(),1,'200'),
 	(@thisTask,'CLIMAX_MINUTES_BEFORE',getdate(),1,'60'),
 	(@thisTask,'CLIMAX_START_URL_TAG',getdate(),1,'<LINK>'),
 	(@thisTask,'CLIMAX_END_URL_TAG',getdate(),1,'<LINK/>'),
-	(@thisTask,'CLIMAX_TASK_MONITORING',getdate(),1,'10000')--Para no crear un procesamiento inicial en task que tal vez existan ponemos nro alto.
+	(@thisTask,'CLIMAX_TASK_MONITORING',getdate(),1,'10000'),--Para no crear un procesamiento inicial en task que tal vez existan ponemos nro alto.
+	(@thisTask,'CLIMAX_MASKED_EVENT',getdate(),1,'CIMAGE')
+	
+
 	END
 	ELSE IF(@taskOptionElements<>9 AND @taskOptionElements<>0 )
 	BEGIN
@@ -330,24 +338,19 @@ set @imageeventsXml=(select * from @image_events FOR XML PATH(''))
 set @tasks_noXml=(select * from @tasks_no FOR XML PATH(''))
 PRINT '@CLIMAX_DELAY_TIME '+CONVERT(VARCHAR(MAX),@CLIMAX_DELAY_TIME)
 PRINT '@CLIMAX_HTTP_SERVER_URL '+CONVERT(VARCHAR(MAX),@CLIMAX_HTTP_SERVER_URL)
-PRINT '@CLIMAX_MAS_PREFIX '+CONVERT(VARCHAR(MAX),@CLIMAX_MAS_PREFIX)
+-- PRINT '@CLIMAX_MAS_PREFIX '+CONVERT(VARCHAR(MAX),@CLIMAX_MAS_PREFIX) 1.2.5
 PRINT '@CLIMAX_MAX_ROW_PROCESSING '+CONVERT(VARCHAR(MAX),@CLIMAX_MAX_ROW_PROCESSING)
 PRINT '@CLIMAX_START_URL_TAG '+CONVERT(VARCHAR(MAX),@CLIMAX_START_URL_TAG)
 PRINT '@CLIMAX_END_URL_TAG '+CONVERT(VARCHAR(MAX),@CLIMAX_END_URL_TAG)
 PRINT '@CLIMAX_MINUTES_BEFORE '+CONVERT(VARCHAR(MAX),@CLIMAX_MINUTES_BEFORE)
 PRINT '@CLIMAX_IMAGE_EVENTS '+CONVERT(VARCHAR(MAX),@imageeventsXml)
 PRINT '@CLIMAX_TASK_MONITORING '+CONVERT(VARCHAR(MAX),@tasks_noXml)
+PRINT '@CLIMAX_MASKED_EVENT '+CONVERT(VARCHAR(MAX),@CLIMAX_MASKED_EVENT)
+
 
 /*FIN -> INICIALIZACIÓN DE SETTINGS*/
 -- Si es test termina acá,es decir si es la task pero valor negativo, es para ver las variables inicializadas
 if @task_no < 0 return
-
-
-
-
-
-
-
 
 
 
@@ -381,7 +384,7 @@ msp.recv_date > DATEADD(MINUTE,-@CLIMAX_MINUTES_BEFORE,GETDATE()) and --respetan
 msp.task_no in (select task_no from @tasks_no) and -- que las tareas sean de climax
 ev.event_id in (select event_id from @image_events) -- que pertenezca a el o los eventos que traigan la url de imagen
 AND
-(ev.aux2 not like 'VF|MAS|http%' -- y que el url no esté puesta en el aux2 de event_history
+(ev.aux2 not like 'VF%' -- y que el url no esté puesta en el aux2 de event_history
 OR 
 ev.aux2 is null)
 and msp.raw_message like '%'+@CLIMAX_END_URL_TAG+'%'
@@ -412,9 +415,9 @@ BEGIN
 
 			
 
-
+			set @ams_zone=SUBSTRING(@raw_message,CHARINDEX(@zone_start_tag,@raw_message)+LEN(@zone_start_tag),CHARINDEX(@zone_end_tag,@raw_message)-CHARINDEX(@zone_start_tag,@raw_message)-LEN(@zone_start_tag))-- 1.2.5
 			set @link=SUBSTRING(@raw_message,CHARINDEX(@CLIMAX_START_URL_TAG,@raw_message)+LEN(@CLIMAX_START_URL_TAG),CHARINDEX(@CLIMAX_END_URL_TAG,@raw_message)-CHARINDEX(@CLIMAX_START_URL_TAG,@raw_message)-LEN(@CLIMAX_START_URL_TAG))
-			set @linkcompleto=@CLIMAX_MAS_PREFIX+@CLIMAX_HTTP_SERVER_URL+@link+@barra+@pipe
+		--	set @linkcompleto=@CLIMAX_MAS_PREFIX+@CLIMAX_HTTP_SERVER_URL+@link+@barra+@pipe 1.2.5
 			set @linkams=@CLIMAX_HTTP_SERVER_URL+@link+@barra --1.2.5
 			/*26/04/2021 Si la variable @CLIMAX_HTTP_SERVER_URL no fue cargada en el task option, tendrá un valor por default,
 			será @CLIMAX_HTTP_SERVER_URL='http://RECEIVER_IP/index.php?uri=', el replace, reemplazará RECEIVER_IP por la ip de la receptora pasada por parámetro,
@@ -422,7 +425,7 @@ BEGIN
 			*/
 			set @ipReceptora= substring(@link,CHARINDEX(@comienzoUrl,@link)+LEN(@comienzoUrl),CHARINDEX(@puertoImagenReceptora,@link)-CHARINDEX(@comienzoUrl,@link)-LEN(@comienzoUrl))
 			--print @ipReceptora
-			set @linkcompleto=replace(@linkcompleto,'RECEIVER_IP',@ipReceptora)
+			--set @linkcompleto=replace(@linkcompleto,'RECEIVER_IP',@ipReceptora) --1.2.5
 			set @linkams=replace(@linkams,'RECEIVER_IP',@ipReceptora) --1.2.5
 			
 
@@ -435,6 +438,7 @@ BEGIN
 			-- 1.2.5
 			set @ams_comment='url: '+@linkams+';
 			'
+			
 
 			-- Este salto de linea, exactamente tal cual está, es a proposito, para que aparezca en verde la linea event_history en MasterMind
 	-- y el vinculo quede clickeable y asi abra la url de la foto
@@ -452,6 +456,7 @@ BEGIN
 			@ams_recurse_flag,
 			@ams_debug, 
 			@ams_emp_no
+			PRINT 'EVENTO MANUAL '+@ams_event_id+' INSERTADO EN ABONADO '+@ams_cs_no+' ZONA '+@ams_zone+' CON EL USUARIO '+@ams_user+' Y emp_no='+ CONVERT(VARCHAR(MAX),@ams_emp_no)
 
 
 
@@ -459,12 +464,16 @@ BEGIN
 
 
 
-			UPDATE event_history SET aux2=@linkcompleto WHERE seqno=@seqno and server_id=@server_id --1.2.3
-			PRINT 'ACTUALIZANDO SEQNO '+CONVERT(VARCHAR(MAX),@seqno)+' EN EVENT_HISTORY' 
-			print @linkcompleto
+		--	UPDATE event_history SET aux2=@linkcompleto WHERE seqno=@seqno and server_id=@server_id --1.2.3 --1.2.5 SE QUITA Y REEMPLAZA POR AP_MANUAL_SIGNAL
+			UPDATE event_history SET aux2='VF' WHERE seqno=@seqno and server_id=@server_id --1.2.5 SE MARCA COMO PROCESADO
+
+
+			PRINT 'ACTUALIZANDO SEQNO '+CONVERT(VARCHAR(MAX),@seqno)+' server_id='+@server_id+' EN EVENT_HISTORY COMO PROCESADO CON VF' -- 1.2.5
+		--	print @linkcompleto 1.2.5
+			print @ams_comment
 			
 			-- vaciar variable 
-			set @linkcompleto=null --19/08/2021
+		--	set @linkcompleto=null --19/08/2021 1.2.5
 			set @ams_cs_no=null -- 1.2.5
 			set @ams_comment=null -- 1.2.5
 			
@@ -480,7 +489,10 @@ DEALLOCATE seqno_index
 
 delete @events_seqs_no --19/08/2021 vaciar la tabla por performance.
 
-print 'salgo del cursor'
+print 'Saliendo del cursor y vaciando variable tabla @events_seqs_no'
+declare @registrosTabla as varchar(max)
+set @registrosTabla=(select count(1) from @events_seqs_no)
+print @registrosTabla+' registros por procesar'
 
 end
 --select * from @events_seqs_no
@@ -515,3 +527,4 @@ WAITFOR DELAY @CLIMAX_DELAY_TIME
 END CATCH
 
 END
+
