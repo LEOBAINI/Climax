@@ -1,11 +1,10 @@
-Text
----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-CREATE PROCEDURE [dbo].[ap_climax] @task_no integer
+--ap_climax 231
+ALTER PROCEDURE [dbo].[ap_climax] @task_no integer
 AS
 BEGIN
 BEGIN TRY
 
-PRINT 'VERSION 1.2.5'	
+PRINT 'VERSION 1.2.6'	
 	
 	/*
 	VERSION 1.2.2
@@ -49,6 +48,11 @@ N'US# FRAN5678901234567890@PROSEGUR.COM LOC# 40.453266 -3.6942988' --Comentario.
 ,0 --debug. Siempre 0
 ,100004 --ID Empleado que inserta. Por ejemplo 100004
 exec dbo.ap_manual_signal N'C123456',NULL,N'SMPAN',N'A',N'600',N'SMART',N'US# FRAN5678901234567890@PROSEGUR.COM LOC# 40.453266 -3.6942988' ,N'N',N'Y',0,100004
+	VERSION 1.2.6
+	Se deja andando la opción de que actualice el event histoty con prefijo VF para que siga apareciendo el ícono de la cámara, a la vez que se envía el evento manual
+	el objetivo que se persigue es la transición tranquila con Smart.
+	Se define que, si el prefijo es NOT_USE en la variable @CLIMAX_MAS_PREFIX, entonces, la funcionalidad de actualizar event_history con la
+	url generadora de icono y link, desaparezca, aunque se debe seguir marcando con VF, para que se reconozca como registro procesado.
 	*/
 	
 /*INICIO -> INICIALIZACIÓN DE SETTINGS*/
@@ -71,7 +75,7 @@ declare @raw_message as varchar(max)
 declare @zone_start_tag as varchar(max) --1.2.5
 declare @zone_end_tag as varchar(max)--1.2.5
 declare @link as varchar(max)
---declare @CLIMAX_MAS_PREFIX as varchar(max) --1.2.5 Ya no se usa, porque no se necesita icono de cámara en link
+declare @CLIMAX_MAS_PREFIX as varchar(max) --1.2.6 Se pide de nuevo para dar tiempo a smart al cambio
 declare @linkcompleto as varchar(max)
 declare @linkams as varchar(max)
 declare @pipe as varchar(1)
@@ -101,6 +105,8 @@ declare @rcvrtyp_id as varchar(max)
 declare @ipReceptora varchar(max)--26/04/2021
 declare @puertoImagenReceptora varchar(max)--26/04/2021
 declare @comienzoUrl as varchar(max)--26/04/2021
+declare @task_options_count as integer
+set @task_options_count=10 --1.2.6 es para el control inicial, de manera que si no están todas, se autocargue.
 --1/9/2021 1.2.5
 /*Variables obligatorias de ap_manual_signal*/
 declare @ams_cs_no	as varchar(20) 
@@ -155,13 +161,13 @@ SELECT @CANTIDAD_VARIABLES_CLIMAX_AP_CLIMAX=COUNT(1) FROM options WHERE
 OPTION_ID='CLIMAX_END_URL_TAG' OR
 OPTION_ID='CLIMAX_HTTP_SERVER_URL' OR
 OPTION_ID='CLIMAX_IMAGE_EVENTS' OR
--- OPTION_ID='CLIMAX_MAS_PREFIX' OR 1.2.5
+OPTION_ID='CLIMAX_MAS_PREFIX' OR --1.2.6
 OPTION_ID='CLIMAX_MAX_ROW_PROCESSING' OR
 OPTION_ID='CLIMAX_MINUTES_BEFORE' OR
 OPTION_ID='CLIMAX_START_URL_TAG' OR
 OPTION_ID='CLIMAX_TASK_MONITORING' OR
 OPTION_ID='CLIMAX_MASKED_EVENT') -- 1.2.5
-IF (@CANTIDAD_VARIABLES_CLIMAX_AP_CLIMAX<>9)
+IF (@CANTIDAD_VARIABLES_CLIMAX_AP_CLIMAX<>@task_options_count)--1.2.6
 BEGIN
 DELETE options WHERE OPTION_ID LIKE 'CLIMAX_%'AND option_id<>'climax_video_url'
 INSERT INTO OPTIONS VALUES
@@ -169,7 +175,7 @@ INSERT INTO OPTIONS VALUES
 ('CLIMAX_END_URL_TAG','CLIMAX_END_URL_TAG',1,GETDATE(),'N',NULL,NULL,NULL,'N','T',NULL,'N','Y'),
 ('CLIMAX_HTTP_SERVER_URL','CLIMAX_HTTP_SERVER_URL',1,GETDATE(),'N',NULL,NULL,NULL,'N','T',NULL,'N','Y'),
 ('CLIMAX_IMAGE_EVENTS','CLIMAX_IMAGE_EVENTS',1,GETDATE(),'N',NULL,NULL,NULL,'N','T',NULL,'N','Y'),
--- ('CLIMAX_MAS_PREFIX','CLIMAX_MAS_PREFIX',1,GETDATE(),'N',NULL,NULL,NULL,'N','T',NULL,'N','Y'), 1.2.5
+('CLIMAX_MAS_PREFIX','CLIMAX_MAS_PREFIX',1,GETDATE(),'N',NULL,NULL,NULL,'N','T',NULL,'N','Y'), --1.2.6
 ('CLIMAX_MAX_ROW_PROCESSING','CLIMAX_MAX_ROW_PROCESSING',1,GETDATE(),'N',NULL,NULL,'N','N','T',NULL,'N','Y'),
 ('CLIMAX_MINUTES_BEFORE','CLIMAX_MINUTES_BEFORE',1,GETDATE(),'N',NULL,NULL,NULL,'N','T',NULL,'N','Y'),
 ('CLIMAX_START_URL_TAG','CLIMAX_START_URL_TAG',1,GETDATE(),'N',NULL,NULL,NULL,'N','T',NULL,'N','Y'),
@@ -179,7 +185,7 @@ PRINT 'TABLA OPTIONS SETEADA'
 END
 ELSE
 BEGIN
-PRINT 'NADA PARA SETEAR EN OPTIONS ESTÁN SUS 10 VARIABLES' 
+PRINT 'NADA PARA SETEAR EN TABLA OPTIONS ESTÁN SUS '+convert(varchar(3),@task_options_count)+' VARIABLES POSIBLES' 
 END
 /*FIN SETTINGS EN TABLA OPTIONS DE DONDE TASK OPTION TOMARÁ VALORES*/
 -- intenta cargar las configs del task_option, 
@@ -190,7 +196,7 @@ BEGIN
 SET @CLIMAX_HTTP_SERVER_URL='http://RECEIVER_IP/index.php?uri='
 /*RECEIVER_IP, se usará ára hacer un replace luego, si es que no hay cargado una url en el task option*/
 END
--- SELECT @CLIMAX_MAS_PREFIX=option_value from M_TASK_OPTION with(nolock) where option_id='CLIMAX_MAS_PREFIX' and task_no=@thisTask 1.2.5
+SELECT @CLIMAX_MAS_PREFIX=option_value from M_TASK_OPTION with(nolock) where option_id='CLIMAX_MAS_PREFIX' and task_no=@thisTask-- 1.2.6
 SELECT @CLIMAX_MAX_ROW_PROCESSING=option_value from M_TASK_OPTION with(nolock) where option_id='CLIMAX_MAX_ROW_PROCESSING' and task_no=@thisTask
 SELECT @CLIMAX_MINUTES_BEFORE=option_value from M_TASK_OPTION with(nolock) where option_id='CLIMAX_MINUTES_BEFORE' and task_no=@thisTask
 SELECT @CLIMAX_START_URL_TAG=option_value from M_TASK_OPTION with(nolock) where option_id='CLIMAX_START_URL_TAG' and task_no=@thisTask
@@ -291,7 +297,7 @@ BEGIN
 	(@thisTask,'CLIMAX_DELAY_TIME',getdate(),1,'00:00:05:000'),
 	(@thisTask,'CLIMAX_HTTP_SERVER_URL',getdate(),1,@CLIMAX_HTTP_SERVER_URL),-- por default será SET @CLIMAX_HTTP_SERVER_URL='http://RECEIVER_IP/index.php?uri='
 	(@thisTask,'CLIMAX_IMAGE_EVENTS',getdate(),1,'CXLINK'),
---	(@thisTask,'CLIMAX_MAS_PREFIX',getdate(),1,'VF|MAS|'), 1.2.5
+	(@thisTask,'CLIMAX_MAS_PREFIX',getdate(),1,'VF|MAS|'), --1.2.6 para no usar, vacío o NOT_USE
 	(@thisTask,'CLIMAX_MAX_ROW_PROCESSING',getdate(),1,'200'),
 	(@thisTask,'CLIMAX_MINUTES_BEFORE',getdate(),1,'60'),
 	(@thisTask,'CLIMAX_START_URL_TAG',getdate(),1,'<LINK>'),
@@ -301,9 +307,9 @@ BEGIN
 	
 
 	END
-	ELSE IF(@taskOptionElements<>9 AND @taskOptionElements<>0 )
+	ELSE IF(@taskOptionElements<>@task_options_count AND @taskOptionElements<>0 )
 	BEGIN
-	PRINT 'COLOQUE TASK_OPTIONS (9) O DEJE SIN TASK_OPTIONS ASÍ SE CARGA POR DEFAULT'
+	PRINT 'COLOQUE TASK_OPTIONS ('+CONVERT(varchar(3),@task_options_count)+') , SOLO COLOCÓ '+CONVERT(varchar(3),@taskOptionElements)+' ELEMENTOS, O DEJE SIN TASK_OPTIONS ASÍ SE CARGA POR DEFAULT'
 				UPDATE m_task_current_status
 				SET last_status_date = GETDATE(), taskstat_no = 4,
 						last_error_msg = 'COMPLETE TASK_OPTIONS OR LEAVE EMPTY FOR AUTO COMPLETE',last_signal_date=@lastSignal,last_status='SEE.RECVTP'
@@ -338,7 +344,7 @@ set @imageeventsXml=(select * from @image_events FOR XML PATH(''))
 set @tasks_noXml=(select * from @tasks_no FOR XML PATH(''))
 PRINT '@CLIMAX_DELAY_TIME '+CONVERT(VARCHAR(MAX),@CLIMAX_DELAY_TIME)
 PRINT '@CLIMAX_HTTP_SERVER_URL '+CONVERT(VARCHAR(MAX),@CLIMAX_HTTP_SERVER_URL)
--- PRINT '@CLIMAX_MAS_PREFIX '+CONVERT(VARCHAR(MAX),@CLIMAX_MAS_PREFIX) 1.2.5
+PRINT '@CLIMAX_MAS_PREFIX '+CONVERT(VARCHAR(MAX),@CLIMAX_MAS_PREFIX)-- 1.2.6
 PRINT '@CLIMAX_MAX_ROW_PROCESSING '+CONVERT(VARCHAR(MAX),@CLIMAX_MAX_ROW_PROCESSING)
 PRINT '@CLIMAX_START_URL_TAG '+CONVERT(VARCHAR(MAX),@CLIMAX_START_URL_TAG)
 PRINT '@CLIMAX_END_URL_TAG '+CONVERT(VARCHAR(MAX),@CLIMAX_END_URL_TAG)
@@ -368,8 +374,7 @@ begin
 PRINT 'TAREA DESHABILITADA SALIENDO'
 set @flag_salida=0 -- Se pone en false la condición del while y termina programa
 RETURN
---set @SQL='KILL ' + CAST(@SPID as varchar(max))
---EXEC (@SQL)
+
 end
 /*FIN si la task está disabled salir y matar proceso*/
 
@@ -384,7 +389,7 @@ msp.recv_date > DATEADD(MINUTE,-@CLIMAX_MINUTES_BEFORE,GETDATE()) and --respetan
 msp.task_no in (select task_no from @tasks_no) and -- que las tareas sean de climax
 ev.event_id in (select event_id from @image_events) -- que pertenezca a el o los eventos que traigan la url de imagen
 AND
-(ev.aux2 not like 'VF%' -- y que el url no esté puesta en el aux2 de event_history
+(ev.aux2 not like 'V%'  -- y que el url no esté puesta en el aux2 de event_history
 OR 
 ev.aux2 is null)
 and msp.raw_message like '%'+@CLIMAX_END_URL_TAG+'%'
@@ -417,7 +422,7 @@ BEGIN
 
 			set @ams_zone=SUBSTRING(@raw_message,CHARINDEX(@zone_start_tag,@raw_message)+LEN(@zone_start_tag),CHARINDEX(@zone_end_tag,@raw_message)-CHARINDEX(@zone_start_tag,@raw_message)-LEN(@zone_start_tag))-- 1.2.5
 			set @link=SUBSTRING(@raw_message,CHARINDEX(@CLIMAX_START_URL_TAG,@raw_message)+LEN(@CLIMAX_START_URL_TAG),CHARINDEX(@CLIMAX_END_URL_TAG,@raw_message)-CHARINDEX(@CLIMAX_START_URL_TAG,@raw_message)-LEN(@CLIMAX_START_URL_TAG))
-		--	set @linkcompleto=@CLIMAX_MAS_PREFIX+@CLIMAX_HTTP_SERVER_URL+@link+@barra+@pipe 1.2.5
+			set @linkcompleto=@CLIMAX_MAS_PREFIX+@CLIMAX_HTTP_SERVER_URL+@link+@barra+@pipe --1.2.6
 			set @linkams=@CLIMAX_HTTP_SERVER_URL+@link+@barra --1.2.5
 			/*26/04/2021 Si la variable @CLIMAX_HTTP_SERVER_URL no fue cargada en el task option, tendrá un valor por default,
 			será @CLIMAX_HTTP_SERVER_URL='http://RECEIVER_IP/index.php?uri=', el replace, reemplazará RECEIVER_IP por la ip de la receptora pasada por parámetro,
@@ -425,7 +430,7 @@ BEGIN
 			*/
 			set @ipReceptora= substring(@link,CHARINDEX(@comienzoUrl,@link)+LEN(@comienzoUrl),CHARINDEX(@puertoImagenReceptora,@link)-CHARINDEX(@comienzoUrl,@link)-LEN(@comienzoUrl))
 			--print @ipReceptora
-			--set @linkcompleto=replace(@linkcompleto,'RECEIVER_IP',@ipReceptora) --1.2.5
+			set @linkcompleto=replace(@linkcompleto,'RECEIVER_IP',@ipReceptora) --1.2.5
 			set @linkams=replace(@linkams,'RECEIVER_IP',@ipReceptora) --1.2.5
 			
 
@@ -436,8 +441,8 @@ BEGIN
 			where system_no=
 			(select system_no from event_history with(nolock) where seqno=@seqno and server_id=@server_id) -- debe ir server_id porque puede haber grupos, caso España
 			-- 1.2.5
-			set @ams_comment='url: '+@linkams+';
-			'
+			set @ams_comment='url: '+@linkams+';'
+			set @ams_comment=@ams_comment+char(13)+CHAR(10) -- new discover LB-> https://www.iteramos.com/pregunta/3556/como-insertar-un-salto-de-linea-en-una-cadena-de-varcharnvarchar-de-sql-server
 			
 
 			-- Este salto de linea, exactamente tal cual está, es a proposito, para que aparezca en verde la linea event_history en MasterMind
@@ -456,24 +461,29 @@ BEGIN
 			@ams_recurse_flag,
 			@ams_debug, 
 			@ams_emp_no
+
 			PRINT 'EVENTO MANUAL '+@ams_event_id+' INSERTADO EN ABONADO '+@ams_cs_no+' ZONA '+@ams_zone+' CON EL USUARIO '+@ams_user+' Y emp_no='+ CONVERT(VARCHAR(MAX),@ams_emp_no)
 
 
 
 
-
+			if(isnull(@CLIMAX_MAS_PREFIX,'NOT_USE')='NOT_USE')
+			begin
+			set @linkcompleto='VF'
+			end
 
 
 		--	UPDATE event_history SET aux2=@linkcompleto WHERE seqno=@seqno and server_id=@server_id --1.2.3 --1.2.5 SE QUITA Y REEMPLAZA POR AP_MANUAL_SIGNAL
-			UPDATE event_history SET aux2='VF' WHERE seqno=@seqno and server_id=@server_id --1.2.5 SE MARCA COMO PROCESADO
+		--	UPDATE event_history SET aux2='VF' WHERE seqno=@seqno and server_id=@server_id --1.2.5 SE MARCA COMO PROCESADO
+		    UPDATE event_history SET aux2=@linkcompleto WHERE seqno=@seqno and server_id=@server_id --1.2.6 se vuelve a activar a pedido de Frank
 
 
-			PRINT 'ACTUALIZANDO SEQNO '+CONVERT(VARCHAR(MAX),@seqno)+' server_id='+@server_id+' EN EVENT_HISTORY COMO PROCESADO CON VF' -- 1.2.5
+			PRINT 'ACTUALIZANDO SEQNO '+CONVERT(VARCHAR(MAX),@seqno)+' server_id='+@server_id+' EN EVENT_HISTORY COMO @linkcompleto PROCESADO CON '+isnull(@linkcompleto,'null') -- 1.2.6
 		--	print @linkcompleto 1.2.5
 			print @ams_comment
 			
 			-- vaciar variable 
-		--	set @linkcompleto=null --19/08/2021 1.2.5
+			set @linkcompleto=null --19/08/2021 1.2.6
 			set @ams_cs_no=null -- 1.2.5
 			set @ams_comment=null -- 1.2.5
 			
