@@ -65,14 +65,16 @@ exec dbo.ap_manual_signal N'C123456',NULL,N'SMPAN',N'A',N'600',N'SMART',N'US# FR
 	
 	VERSIÒN 1.2.7 
 	Se cambia la lògica de CLIMAX_MAS_PREFIX para que solo pueda tomar valor "Y" O "N" (SIN COMILLAS)
-	El objetivo es simplificar el setting, si el input es Y, completar con VF.. y si el valor es otra cosa o nulo
+	El objetivo es simplificar el setting, si el input es Y, completar con VF.. para mostrar ícono de cámara en event_history y si el valor es otra cosa o nulo
 	no generarà el ìcono de la càmara.
-	Se inserta el seqno del evento procesado dentro del comment del nuevo evento generado con ap_manual_signal,
-	para así poder llevar registro en memoria, de cual fue el último seqno procesado.
-	La primera vez indefectiblemente tiene que consultar a Event_history el ultimo seqno procesado.
+	Se inserta el seqno del evento procesado dentro del comment del nuevo evento generado con ap_manual_signal (MASKED_EVENT),
+	para así poder llevar registro en memoria, de cuál fue el último seqno procesado.
+	La primera vez indefectiblemente tiene que consultar a Event_history el ultimo seqno procesado, luego por performance, almacena ese valor en memoria.
 	Y para saber si fue procesado, busca en el último MASKED_EVENT, que si no existe en el tiempo definido por la variable
-	MINUTES_BEHIND, lo setea vacío, y procesa todo lo que esté en esos minutos.
-	Se agrega funcionalidad para reinicio de la task desde Master,
+	MINUTES_BEHIND, lo setea vacío, y procesa todo lo que esté mayor a  esos minutos seteados en la task option.
+	Se agrega funcionalidad para reinicio de la task desde Master.
+	La mejora hace que al cambiar de pasivo a activo, no se reprocesen eventos.
+
 	
 	
 	
