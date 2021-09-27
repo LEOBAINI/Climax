@@ -1,10 +1,18 @@
+USE [MonitorDB]
+GO
+/****** Object:  StoredProcedure [dbo].[ap_climax]    Script Date: 27/09/2021 4:41:36 ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+--ap_climax -1000
 --ap_climax 231
 ALTER PROCEDURE [dbo].[ap_climax] @task_no integer
 AS
 BEGIN
 BEGIN TRY
 
-PRINT 'VERSION 1.2.6'	
+PRINT 'VERSION 1.2.7'	
 	
 	/*
 	VERSION 1.2.2
@@ -53,6 +61,21 @@ exec dbo.ap_manual_signal N'C123456',NULL,N'SMPAN',N'A',N'600',N'SMART',N'US# FR
 	el objetivo que se persigue es la transición tranquila con Smart.
 	Se define que, si el prefijo es NOT_USE en la variable @CLIMAX_MAS_PREFIX, entonces, la funcionalidad de actualizar event_history con la
 	url generadora de icono y link, desaparezca, aunque se debe seguir marcando con VF, para que se reconozca como registro procesado.
+	
+	
+	VERSIÒN 1.2.7 
+	Se cambia la lògica de CLIMAX_MAS_PREFIX para que solo pueda tomar valor "Y" O "N" (SIN COMILLAS)
+	El objetivo es simplificar el setting, si el input es Y, completar con VF.. y si el valor es otra cosa o nulo
+	no generarà el ìcono de la càmara.
+	Se inserta el seqno del evento procesado dentro del comment del nuevo evento generado con ap_manual_signal,
+	para así poder llevar registro en memoria, de cual fue el último seqno procesado.
+	La primera vez indefectiblemente tiene que consultar a Event_history el ultimo seqno procesado.
+	Y para saber si fue procesado, busca en el último MASKED_EVENT, que si no existe en el tiempo definido por la variable
+	MINUTES_BEHIND, lo setea vacío, y procesa todo lo que esté en esos minutos.
+	Se agrega funcionalidad para reinicio de la task desde Master,
+	
+	
+	
 	*/
 	
 /*INICIO -> INICIALIZACIÓN DE SETTINGS*/
@@ -71,6 +94,8 @@ declare @tasks_no as table (task_no integer)
 declare @CLIMAX_MINUTES_BEFORE as integer
 --ejemplo packet sender S011[#8888|NBA*'<LINK>http://10.24.34.23:8899/capture_event/media/35000009/2021-02-11/2021-02-11_124646_39_06/35000009_012a3930_2021-02-11_134646_006.jpg<LINK/>']    <6>
 declare @seqno as numeric(18,0)
+declare @last_msignal_processed_seqno as numeric(18,0) --1.2.7
+declare @last_masked_event_hist_processed_seqno as numeric(18,0) --1.2.7
 declare @raw_message as varchar(max)
 declare @zone_start_tag as varchar(max) --1.2.5
 declare @zone_end_tag as varchar(max)--1.2.5
@@ -120,6 +145,14 @@ declare @ams_log_only as char(1)
 declare @ams_recurse_flag as char(1)
 declare @ams_debug as int 
 declare @ams_emp_no	as int
+
+/*1.2.7 variables para identificar el ultimo procesado*/
+declare @startSeqnoTag as varchar(max)
+declare @endSeqnoTag as varchar(max)
+set @startSeqnoTag='<@seqno>'
+set @endSeqnoTag='</@seqno>'
+DECLARE @COMMENT AS VARCHAR(max)--1.2.7
+declare @registrosTabla as varchar(max)--1.2.7
 /*Variables para determinar la zona en función del rawmessage*/-- 1.2.5
 set @zone_start_tag='|N'
 set @zone_end_tag='*'''
@@ -297,7 +330,7 @@ BEGIN
 	(@thisTask,'CLIMAX_DELAY_TIME',getdate(),1,'00:00:05:000'),
 	(@thisTask,'CLIMAX_HTTP_SERVER_URL',getdate(),1,@CLIMAX_HTTP_SERVER_URL),-- por default será SET @CLIMAX_HTTP_SERVER_URL='http://RECEIVER_IP/index.php?uri='
 	(@thisTask,'CLIMAX_IMAGE_EVENTS',getdate(),1,'CXLINK'),
-	(@thisTask,'CLIMAX_MAS_PREFIX',getdate(),1,'VF|MAS|'), --1.2.6 para no usar, vacío o NOT_USE
+	(@thisTask,'CLIMAX_MAS_PREFIX',getdate(),1,'Y'), --1.2.6 para no usar, vacío o NOT_USE
 	(@thisTask,'CLIMAX_MAX_ROW_PROCESSING',getdate(),1,'200'),
 	(@thisTask,'CLIMAX_MINUTES_BEFORE',getdate(),1,'60'),
 	(@thisTask,'CLIMAX_START_URL_TAG',getdate(),1,'<LINK>'),
@@ -354,9 +387,30 @@ PRINT '@CLIMAX_TASK_MONITORING '+CONVERT(VARCHAR(MAX),@tasks_noXml)
 PRINT '@CLIMAX_MASKED_EVENT '+CONVERT(VARCHAR(MAX),@CLIMAX_MASKED_EVENT)
 
 
+
 /*FIN -> INICIALIZACIÓN DE SETTINGS*/
 -- Si es test termina acá,es decir si es la task pero valor negativo, es para ver las variables inicializadas
 if @task_no < 0 return
+
+
+/*setear el último evento procesado para buscar a partir del siguiente en msignal_processed que sea mayor a este*/
+
+SET @last_masked_event_hist_processed_seqno=(select max(seqno) from event_history
+where event_id=@CLIMAX_MASKED_EVENT and event_date > DATEADD(MINUTE,-@CLIMAX_MINUTES_BEFORE,GETDATE()))--1.2.7
+SET @COMMENT=(SELECT COMMENT FROM EVENT_HISTORY WHERE SEQNO=@last_masked_event_hist_processed_seqno)
+SET @COMMENT=ISNULL(@COMMENT,'VACIO')
+
+
+if(CHARINDEX(@startSeqnoTag,@COMMENT)=0 or @COMMENT='VACIO') --si en ese seqno, no estaba el start tag del seqno
+begin
+set @last_msignal_processed_seqno=0 --asumo primera vez que corre y asigno cero, para que procese esta version
+end
+else -- si está es porque  le inserté el seqno en el comment con ese tag
+begin
+set @last_msignal_processed_seqno=SUBSTRING(@COMMENT,CHARINDEX(@startSeqnoTag,@COMMENT)+ LEN(@startSeqnoTag),CHARINDEX(@endSeqnoTag,@COMMENT)-CHARINDEX(@startSeqnoTag,@COMMENT)-LEN(@startSeqnoTag))
+
+end
+print 'Ultimo seq_no procesado de m_signal_processed que tiene en el comment el string '+@startSeqnoTag+' es :'+convert(varchar(max),@last_msignal_processed_seqno)
 
 
 
@@ -372,6 +426,11 @@ where task_no=@thisTask
 if (@enable_flag='N')
 begin
 PRINT 'TAREA DESHABILITADA SALIENDO'
+UPDATE m_task_current_status--1.2.7 Es para que master se dé cuenta de que el sp entendió mensaje de reinicio
+				SET last_status_date = GETDATE(), taskstat_no = 3,
+						last_error_msg = 'Shutdown',last_signal_date=@lastSignal,last_status=null
+				WHERE task_no = @thisTask 
+				print 'Actualizo Estado de la TASK'
 set @flag_salida=0 -- Se pone en false la condición del while y termina programa
 RETURN
 
@@ -381,19 +440,21 @@ end
 
 
 
+
 insert into @events_seqs_no
-select top (@CLIMAX_MAX_ROW_PROCESSING) msp.event_seqno,ev.aux2  from m_signal_processed msp with(nolock)
-inner join event_history ev on ev.seqno=msp.event_seqno
+select top (@CLIMAX_MAX_ROW_PROCESSING) msp.event_seqno,'ev.aux2'/*corregir*/  from m_signal_processed msp with(nolock)
+--inner join event_history ev on ev.seqno=msp.event_seqno
 where 
 msp.recv_date > DATEADD(MINUTE,-@CLIMAX_MINUTES_BEFORE,GETDATE()) and --respetando a partir de cuando
 msp.task_no in (select task_no from @tasks_no) and -- que las tareas sean de climax
-ev.event_id in (select event_id from @image_events) -- que pertenezca a el o los eventos que traigan la url de imagen
-AND
-(ev.aux2 not like 'V%'  -- y que el url no esté puesta en el aux2 de event_history
-OR 
-ev.aux2 is null)
-and msp.raw_message like '%'+@CLIMAX_END_URL_TAG+'%'
-order by msp.event_seqno asc 
+--ev.event_id in (select event_id from @image_events) -- que pertenezca a el o los eventos que traigan la url de imagen
+--AND el hecho que en el rawmessage llegue @CLIMAX_END_URL_TAG implica que el evento es el que debe ser 1.2.7
+msp.event_seqno > @last_msignal_processed_seqno
+--(ev.aux2 not like 'V%'  -- y que el url no esté puesta en el aux2 de event_history
+--OR 
+--ev.aux2 is null)
+and msp.raw_message like '%'+@CLIMAX_END_URL_TAG+'%' --
+order by msp.event_seqno asc --para que entre en el cursor ordenado y procese de menor a mayor, para anotar el último
 
 
 
@@ -422,7 +483,15 @@ BEGIN
 
 			set @ams_zone=SUBSTRING(@raw_message,CHARINDEX(@zone_start_tag,@raw_message)+LEN(@zone_start_tag),CHARINDEX(@zone_end_tag,@raw_message)-CHARINDEX(@zone_start_tag,@raw_message)-LEN(@zone_start_tag))-- 1.2.5
 			set @link=SUBSTRING(@raw_message,CHARINDEX(@CLIMAX_START_URL_TAG,@raw_message)+LEN(@CLIMAX_START_URL_TAG),CHARINDEX(@CLIMAX_END_URL_TAG,@raw_message)-CHARINDEX(@CLIMAX_START_URL_TAG,@raw_message)-LEN(@CLIMAX_START_URL_TAG))
-			set @linkcompleto=@CLIMAX_MAS_PREFIX+@CLIMAX_HTTP_SERVER_URL+@link+@barra+@pipe --1.2.6
+			--1.2.7 funcion de elegir si actualiza event history en aux2
+			if(isnull(@CLIMAX_MAS_PREFIX,'Y')='Y')		
+			begin
+			set @linkcompleto='VF|MAS|'+@CLIMAX_HTTP_SERVER_URL+@link+@barra+@pipe --1.2.7
+			set @linkcompleto=replace(@linkcompleto,'RECEIVER_IP',@ipReceptora) --1.2.7
+			UPDATE event_history SET aux2=@linkcompleto WHERE seqno=@seqno and server_id=@server_id
+			PRINT 'ACTUALIZANDO SEQNO '+CONVERT(VARCHAR(MAX),@seqno)+' server_id='+@server_id+' EN EVENT_HISTORY COMO @linkcompleto PROCESADO CON '+isnull(@linkcompleto,'null')
+			end
+			
 			set @linkams=@CLIMAX_HTTP_SERVER_URL+@link+@barra --1.2.5
 			/*26/04/2021 Si la variable @CLIMAX_HTTP_SERVER_URL no fue cargada en el task option, tendrá un valor por default,
 			será @CLIMAX_HTTP_SERVER_URL='http://RECEIVER_IP/index.php?uri=', el replace, reemplazará RECEIVER_IP por la ip de la receptora pasada por parámetro,
@@ -430,7 +499,7 @@ BEGIN
 			*/
 			set @ipReceptora= substring(@link,CHARINDEX(@comienzoUrl,@link)+LEN(@comienzoUrl),CHARINDEX(@puertoImagenReceptora,@link)-CHARINDEX(@comienzoUrl,@link)-LEN(@comienzoUrl))
 			--print @ipReceptora
-			set @linkcompleto=replace(@linkcompleto,'RECEIVER_IP',@ipReceptora) --1.2.5
+			
 			set @linkams=replace(@linkams,'RECEIVER_IP',@ipReceptora) --1.2.5
 			
 
@@ -443,11 +512,12 @@ BEGIN
 			-- 1.2.5
 			set @ams_comment='url: '+@linkams+';'
 			set @ams_comment=@ams_comment+char(13)+CHAR(10) -- new discover LB-> https://www.iteramos.com/pregunta/3556/como-insertar-un-salto-de-linea-en-una-cadena-de-varcharnvarchar-de-sql-server
-			
+			set @ams_comment=@startSeqnoTag+convert(varchar(max),@seqno)+@endSeqnoTag+@ams_comment
 
 			-- Este salto de linea, exactamente tal cual está, es a proposito, para que aparezca en verde la linea event_history en MasterMind
 	-- y el vinculo quede clickeable y asi abra la url de la foto
 	-- descubrimiento by Frank
+
 
 			exec dbo.ap_manual_signal 
 			@ams_cs_no, 
@@ -464,21 +534,17 @@ BEGIN
 
 			PRINT 'EVENTO MANUAL '+@ams_event_id+' INSERTADO EN ABONADO '+@ams_cs_no+' ZONA '+@ams_zone+' CON EL USUARIO '+@ams_user+' Y emp_no='+ CONVERT(VARCHAR(MAX),@ams_emp_no)
 
+			set @last_msignal_processed_seqno=@seqno--1.2.7 guardo en memoria el ultimo procesado
+
+			PRINT 'ULTIMO EVENT_SEQNO DE MSIGNAL_PROCESSED PROCESADO POR AP_CLIMAX -> '+CONVERT(VARCHAR(MAX),@last_msignal_processed_seqno)
 
 
-
-			if(isnull(@CLIMAX_MAS_PREFIX,'NOT_USE')='NOT_USE')
-			begin
-			set @linkcompleto='VF'
-			end
-
-
+			
 		--	UPDATE event_history SET aux2=@linkcompleto WHERE seqno=@seqno and server_id=@server_id --1.2.3 --1.2.5 SE QUITA Y REEMPLAZA POR AP_MANUAL_SIGNAL
 		--	UPDATE event_history SET aux2='VF' WHERE seqno=@seqno and server_id=@server_id --1.2.5 SE MARCA COMO PROCESADO
-		    UPDATE event_history SET aux2=@linkcompleto WHERE seqno=@seqno and server_id=@server_id --1.2.6 se vuelve a activar a pedido de Frank
+		 --   UPDATE event_history SET aux2=@linkcompleto WHERE seqno=@seqno and server_id=@server_id --1.2.6 se vuelve a activar a pedido de Frank
 
-
-			PRINT 'ACTUALIZANDO SEQNO '+CONVERT(VARCHAR(MAX),@seqno)+' server_id='+@server_id+' EN EVENT_HISTORY COMO @linkcompleto PROCESADO CON '+isnull(@linkcompleto,'null') -- 1.2.6
+		     -- 1.2.6
 		--	print @linkcompleto 1.2.5
 			print @ams_comment
 			
@@ -500,7 +566,7 @@ DEALLOCATE seqno_index
 delete @events_seqs_no --19/08/2021 vaciar la tabla por performance.
 
 print 'Saliendo del cursor y vaciando variable tabla @events_seqs_no'
-declare @registrosTabla as varchar(max)
+
 set @registrosTabla=(select count(1) from @events_seqs_no)
 print @registrosTabla+' registros por procesar'
 
