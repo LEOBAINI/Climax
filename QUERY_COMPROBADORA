@@ -2,7 +2,7 @@
 select sy.cs_no,event_date,ev1.system_no,seqno,event_id,comment,aux2,
 (select count(1) from event_history ev2 
 where event_date> getdate()-0.01 
-and event_id='200'
+and event_id='cxlin2'
 and charindex(convert(varchar(max),ev1.seqno),ev2.comment)>0
 ) evento_cxlin2_generado
 ,(select comment from event_history  where event_date> getdate()-0.01 and charindex(convert(varchar(max),ev1.seqno),comment)>0) comment_generado
