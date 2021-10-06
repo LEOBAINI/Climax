@@ -1,18 +1,10 @@
-USE [MonitorDB]
-GO
-/****** Object:  StoredProcedure [dbo].[ap_climax]    Script Date: 27/09/2021 4:41:36 ******/
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
---ap_climax -1000
---ap_climax 231
-ALTER PROCEDURE [dbo].[ap_climax] @task_no integer
+
+alter PROCEDURE [dbo].[ap_climax] @task_no integer
 AS
 BEGIN
 BEGIN TRY
 
-PRINT 'VERSION 1.2.7'	
+PRINT 'VERSION 1.2.7.2'	
 	
 	/*
 	VERSION 1.2.2
@@ -65,18 +57,53 @@ exec dbo.ap_manual_signal N'C123456',NULL,N'SMPAN',N'A',N'600',N'SMART',N'US# FR
 	
 	VERSIÒN 1.2.7 
 	Se cambia la lògica de CLIMAX_MAS_PREFIX para que solo pueda tomar valor "Y" O "N" (SIN COMILLAS)
-	El objetivo es simplificar el setting, si el input es Y, completar con VF.. para mostrar ícono de cámara en event_history y si el valor es otra cosa o nulo
+	El objetivo es simplificar el setting, si el input es Y, completar con VF.. y si el valor es otra cosa o nulo
 	no generarà el ìcono de la càmara.
-	Se inserta el seqno del evento procesado dentro del comment del nuevo evento generado con ap_manual_signal (MASKED_EVENT),
-	para así poder llevar registro en memoria, de cuál fue el último seqno procesado.
-	La primera vez indefectiblemente tiene que consultar a Event_history el ultimo seqno procesado, luego por performance, almacena ese valor en memoria.
+	Se inserta el seqno del evento procesado dentro del comment del nuevo evento generado con ap_manual_signal,
+	para así poder llevar registro en memoria, de cual fue el último seqno procesado.
+	La primera vez indefectiblemente tiene que consultar a Event_history el ultimo seqno procesado.
 	Y para saber si fue procesado, busca en el último MASKED_EVENT, que si no existe en el tiempo definido por la variable
-	MINUTES_BEHIND, lo setea vacío, y procesa todo lo que esté mayor a  esos minutos seteados en la task option.
-	Se agrega funcionalidad para reinicio de la task desde Master.
-	La mejora hace que al cambiar de pasivo a activo, no se reprocesen eventos.
+	MINUTES_BEHIND, lo setea vacío, y procesa todo lo que esté en esos minutos.
+	Se agrega funcionalidad para reinicio de la task desde Master,
+	
+		VERSIÒN 1.2.7.1 se corrge bug en comment de línea @server_id 
+	
+		SET @COMMENT=(SELECT COMMENT FROM EVENT_HISTORY WHERE SEQNO=@last_masked_event_hist_processed_seqno), agregando server_id=@server_id 
+		se setea variable ip_receptora inmediatamente luego del condicional if(isnull(@CLIMAX_MAS_PREFIX,'Y')='Y') porque quedaba
+		link_cmpleto en null en el replace.
 
-	
-	
+		VERSIÓN 1.2.7.2
+		SE MUEVE OPCIÓN ANTES DEL CONDICIONAR SI CLIMAX PREFIX = Y, INDEPENDIENTEMENTE DEL VALOR QUE TENGA, LA IP SE NECESITA SI O SI
+		set @ipReceptora= substring(@link,CHARINDEX(@comienzoUrl,@link)+LEN(@comienzoUrl),CHARINDEX(@puertoImagenReceptora,@link)-CHARINDEX(@comienzoUrl,@link)-LEN(@comienzoUrl))
+			print 'Imprimiendo ip de receptora'
+			print  @ipReceptora
+		Se agrega nolock a:
+		/*setear el último evento procesado para buscar a partir del siguiente en msignal_processed que sea mayor a este*/
+
+		SET @last_masked_event_hist_processed_seqno=(select max(seqno) from event_history with(nolock) --1.2.7.2 se agrega nolock
+		where event_id=@CLIMAX_MASKED_EVENT and event_date > DATEADD(MINUTE,-@CLIMAX_MINUTES_BEFORE,GETDATE()))--1.2.7
+		SET @COMMENT=(SELECT COMMENT FROM EVENT_HISTORY WHERE SEQNO=@last_masked_event_hist_processed_seqno and server_id=@server_id) --1772
+		SET @COMMENT=ISNULL(@COMMENT,'VACIO')
+
+		Se optimiza velocidad de arranque con
+
+		Viejo code
+/*setear el último evento procesado para buscar a partir del siguiente en msignal_processed que sea mayor a este*/
+/*
+SET @last_masked_event_hist_processed_seqno=(select max(seqno) from event_history with(nolock) --1.2.7.2 se agrega nolock
+where event_id=@CLIMAX_MASKED_EVENT and event_date > DATEADD(MINUTE,-@CLIMAX_MINUTES_BEFORE,GETDATE()))--1.2.7
+SET @COMMENT=(SELECT COMMENT FROM EVENT_HISTORY WHERE SEQNO=@last_masked_event_hist_processed_seqno and server_id=@server_id) --1772
+*/
+
+
+Nuevo code
+SET @COMMENT=(SELECT COMMENT FROM EVENT_HISTORY with(nolock) WHERE 
+SEQNO=(select max(seqno) from event_history with(nolock) where event_id=@CLIMAX_MASKED_EVENT and event_date > DATEADD(MINUTE,-@CLIMAX_MINUTES_BEFORE,GETDATE()))
+and server_id=@server_id) --1.2.7.2 
+
+y se elimina variable --declare @last_masked_event_hist_processed_seqno as numeric(18,0) --1.2.7.2
+
+
 	
 	*/
 	
@@ -97,7 +124,7 @@ declare @CLIMAX_MINUTES_BEFORE as integer
 --ejemplo packet sender S011[#8888|NBA*'<LINK>http://10.24.34.23:8899/capture_event/media/35000009/2021-02-11/2021-02-11_124646_39_06/35000009_012a3930_2021-02-11_134646_006.jpg<LINK/>']    <6>
 declare @seqno as numeric(18,0)
 declare @last_msignal_processed_seqno as numeric(18,0) --1.2.7
-declare @last_masked_event_hist_processed_seqno as numeric(18,0) --1.2.7
+--declare @last_masked_event_hist_processed_seqno as numeric(18,0) --1.2.7.2
 declare @raw_message as varchar(max)
 declare @zone_start_tag as varchar(max) --1.2.5
 declare @zone_end_tag as varchar(max)--1.2.5
@@ -393,15 +420,22 @@ PRINT '@CLIMAX_MASKED_EVENT '+CONVERT(VARCHAR(MAX),@CLIMAX_MASKED_EVENT)
 /*FIN -> INICIALIZACIÓN DE SETTINGS*/
 -- Si es test termina acá,es decir si es la task pero valor negativo, es para ver las variables inicializadas
 if @task_no < 0 return
-
+print 'setear el último evento procesado para buscar a partir del siguiente en msignal_processed que sea mayor a este '+ CONVERT(varchar,getdate(),9) --1.2.7.2
 
 /*setear el último evento procesado para buscar a partir del siguiente en msignal_processed que sea mayor a este*/
-
-SET @last_masked_event_hist_processed_seqno=(select max(seqno) from event_history
+/*
+SET @last_masked_event_hist_processed_seqno=(select max(seqno) from event_history with(nolock) --1.2.7.2 se agrega nolock
 where event_id=@CLIMAX_MASKED_EVENT and event_date > DATEADD(MINUTE,-@CLIMAX_MINUTES_BEFORE,GETDATE()))--1.2.7
-SET @COMMENT=(SELECT COMMENT FROM EVENT_HISTORY WHERE SEQNO=@last_masked_event_hist_processed_seqno)
-SET @COMMENT=ISNULL(@COMMENT,'VACIO')
+SET @COMMENT=(SELECT COMMENT FROM EVENT_HISTORY WHERE SEQNO=@last_masked_event_hist_processed_seqno and server_id=@server_id) --1772
+*/
 
+
+SET @COMMENT=(SELECT COMMENT FROM EVENT_HISTORY with(nolock) WHERE 
+SEQNO=(select max(seqno) from event_history with(nolock) where event_id=@CLIMAX_MASKED_EVENT and event_date > DATEADD(MINUTE,-@CLIMAX_MINUTES_BEFORE,GETDATE()))
+and server_id=@server_id) --1.2.7.2 
+
+SET @COMMENT=ISNULL(@COMMENT,'VACIO')
+print 'setear el último evento procesado para buscar a partir del siguiente en msignal_processed que sea mayor a este '+CONVERT(varchar,getdate(),9) --1.2.7.2
 
 if(CHARINDEX(@startSeqnoTag,@COMMENT)=0 or @COMMENT='VACIO') --si en ese seqno, no estaba el start tag del seqno
 begin
@@ -485,11 +519,29 @@ BEGIN
 
 			set @ams_zone=SUBSTRING(@raw_message,CHARINDEX(@zone_start_tag,@raw_message)+LEN(@zone_start_tag),CHARINDEX(@zone_end_tag,@raw_message)-CHARINDEX(@zone_start_tag,@raw_message)-LEN(@zone_start_tag))-- 1.2.5
 			set @link=SUBSTRING(@raw_message,CHARINDEX(@CLIMAX_START_URL_TAG,@raw_message)+LEN(@CLIMAX_START_URL_TAG),CHARINDEX(@CLIMAX_END_URL_TAG,@raw_message)-CHARINDEX(@CLIMAX_START_URL_TAG,@raw_message)-LEN(@CLIMAX_START_URL_TAG))
+			--1.2.7.2 se necesita ip de impresora antes y despues del condicional 
+			set @ipReceptora= substring(@link,CHARINDEX(@comienzoUrl,@link)+LEN(@comienzoUrl),CHARINDEX(@puertoImagenReceptora,@link)-CHARINDEX(@comienzoUrl,@link)-LEN(@comienzoUrl))
+			print 'Imprimiendo ip de receptora'
+			print  @ipReceptora
+
 			--1.2.7 funcion de elegir si actualiza event history en aux2
 			if(isnull(@CLIMAX_MAS_PREFIX,'Y')='Y')		
 			begin
 			set @linkcompleto='VF|MAS|'+@CLIMAX_HTTP_SERVER_URL+@link+@barra+@pipe --1.2.7
-			set @linkcompleto=replace(@linkcompleto,'RECEIVER_IP',@ipReceptora) --1.2.7
+			print '@linkcompleto antes de replace es -> '+@linkcompleto
+			
+					
+			set @linkcompleto=replace(@linkcompleto,'RECEIVER_IP',@ipReceptora)--1.2.7
+
+			print '@linkcompleto es -> '+@linkcompleto
+			print '@CLIMAX_HTTP_SERVER_URL -> '+@CLIMAX_HTTP_SERVER_URL
+			print '@link->' +@link
+			print '@barra->'+@barra
+			print 'ip de receptora:'
+			print @ipReceptora
+			print '@pipe->'+@pipe
+			print '*************'
+
 			UPDATE event_history SET aux2=@linkcompleto WHERE seqno=@seqno and server_id=@server_id
 			PRINT 'ACTUALIZANDO SEQNO '+CONVERT(VARCHAR(MAX),@seqno)+' server_id='+@server_id+' EN EVENT_HISTORY COMO @linkcompleto PROCESADO CON '+isnull(@linkcompleto,'null')
 			end
@@ -499,8 +551,6 @@ BEGIN
 			será @CLIMAX_HTTP_SERVER_URL='http://RECEIVER_IP/index.php?uri=', el replace, reemplazará RECEIVER_IP por la ip de la receptora pasada por parámetro,
 			de esa manera, si entró por más de una receptora, el usuario será redireccionado con el link que corresponda, ya que las imágenes no redundan entre las receptoras.
 			*/
-			set @ipReceptora= substring(@link,CHARINDEX(@comienzoUrl,@link)+LEN(@comienzoUrl),CHARINDEX(@puertoImagenReceptora,@link)-CHARINDEX(@comienzoUrl,@link)-LEN(@comienzoUrl))
-			--print @ipReceptora
 			
 			set @linkams=replace(@linkams,'RECEIVER_IP',@ipReceptora) --1.2.5
 			
@@ -605,4 +655,6 @@ WAITFOR DELAY @CLIMAX_DELAY_TIME
 END CATCH
 
 END
+
+
 
